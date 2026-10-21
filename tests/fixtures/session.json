@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "batches": [
+    {
+      "attempt": {
+        "poll_id": "fixture-000", "device_id": "synthetic-router",
+        "interface_id": "inventory-uplink", "interface_identity": "incarnation-a",
+        "started_at": "2026-10-21T11:59:59.900000Z", "finished_at": "2026-10-21T12:00:00Z",
+        "metrics": [{"name": "if_in_octets", "kind": "counter", "unit": "octets", "counter_bits": 64}],
+        "status": "success"
+      },
+      "observations": [{
+        "poll_id": "fixture-000", "device_id": "synthetic-router",
+        "interface_id": "inventory-uplink", "interface_identity": "incarnation-a",
+        "metric": {"name": "if_in_octets", "kind": "counter", "unit": "octets", "counter_bits": 64},
+        "raw_value": 1000, "queried_at": "2026-10-21T12:00:00Z",
+        "ingested_at": "2026-10-21T12:00:01Z", "observed_at": null,
+        "uptime_ticks": 100000, "discontinuity_ticks": 0,
+        "interface_index": 4, "interface_name": "synthetic-ether", "schema_version": 1
+      }]
+    },
+    {
+      "attempt": {
+        "poll_id": "fixture-030", "device_id": "synthetic-router",
+        "interface_id": "inventory-uplink", "interface_identity": "incarnation-a",
+        "started_at": "2026-10-21T12:00:29.900000Z", "finished_at": "2026-10-21T12:00:30Z",
+        "metrics": [{"name": "if_in_octets", "kind": "counter", "unit": "octets", "counter_bits": 64}],
+        "status": "success"
+      },
+      "observations": [{
+        "poll_id": "fixture-030", "device_id": "synthetic-router",
+        "interface_id": "inventory-uplink", "interface_identity": "incarnation-a",
+        "metric": {"name": "if_in_octets", "kind": "counter", "unit": "octets", "counter_bits": 64},
+        "raw_value": 1300, "queried_at": "2026-10-21T12:00:30Z",
+        "ingested_at": "2026-10-21T12:00:31Z", "observed_at": null,
+        "uptime_ticks": 103000, "discontinuity_ticks": 0,
+        "interface_index": 4, "interface_name": "synthetic-ether", "schema_version": 1
+      }]
+    },
+    {
+      "attempt": {
+        "poll_id": "fixture-060", "device_id": "synthetic-router",
+        "interface_id": "inventory-uplink", "interface_identity": "incarnation-a",
+        "started_at": "2026-10-21T12:00:59Z", "finished_at": "2026-10-21T12:01:00Z",
+        "metrics": [{"name": "if_in_octets", "kind": "counter", "unit": "octets", "counter_bits": 64}],
+        "status": "error", "error_code": "timeout"
+      },
+      "observations": []
+    },
+    {
+      "attempt": {
+        "poll_id": "fixture-150", "device_id": "synthetic-router",
+        "interface_id": "inventory-uplink", "interface_identity": "incarnation-a",
+        "started_at": "2026-10-21T12:02:29.900000Z", "finished_at": "2026-10-21T12:02:30Z",
+        "metrics": [{"name": "if_in_octets", "kind": "counter", "unit": "octets", "counter_bits": 64}],
+        "status": "success"
+      },
+      "observations": [{
+        "poll_id": "fixture-150", "device_id": "synthetic-router",
+        "interface_id": "inventory-uplink", "interface_identity": "incarnation-a",
+        "metric": {"name": "if_in_octets", "kind": "counter", "unit": "octets", "counter_bits": 64},
+        "raw_value": 2500, "queried_at": "2026-10-21T12:02:30Z",
+        "ingested_at": "2026-10-21T12:02:31Z", "observed_at": null,
+        "uptime_ticks": 115000, "discontinuity_ticks": 0,
+        "interface_index": 4, "interface_name": "synthetic-ether", "schema_version": 1
+      }]
+    },
+    {
+      "attempt": {
+        "poll_id": "fixture-180", "device_id": "synthetic-router",
+        "interface_id": "inventory-uplink", "interface_identity": "incarnation-a",
+        "started_at": "2026-10-21T12:02:59.900000Z", "finished_at": "2026-10-21T12:03:00Z",
+        "metrics": [{"name": "if_in_octets", "kind": "counter", "unit": "octets", "counter_bits": 64}],
+        "status": "success"
+      },
+      "observations": [{
+        "poll_id": "fixture-180", "device_id": "synthetic-router",
+        "interface_id": "inventory-uplink", "interface_identity": "incarnation-a",
+        "metric": {"name": "if_in_octets", "kind": "counter", "unit": "octets", "counter_bits": 64},
+        "raw_value": 50, "queried_at": "2026-10-21T12:03:00Z",
+        "ingested_at": "2026-10-21T12:03:01Z", "observed_at": null,
+        "uptime_ticks": 100, "discontinuity_ticks": 0,
+        "interface_index": 4, "interface_name": "synthetic-ether", "schema_version": 1
+      }]
+    }
+  ]
+}
