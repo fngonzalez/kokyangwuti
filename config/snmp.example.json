@@ -1,0 +1,16 @@
+{
+  "host": "192.0.2.1",
+  "port": 161,
+  "version": "2c",
+  "community": "",
+  "timeout_seconds": 2,
+  "retries": 1,
+  "interface_index": null,
+  "device_id": "lab-router-01",
+  "interface_id": "lab-interface-01",
+  "interface_identity": "installation-to-be-verified",
+  "expected_sys_object_id": null,
+  "expected_interface_name": null,
+  "expected_interface_mac": null,
+  "counter_bits": 64
+}

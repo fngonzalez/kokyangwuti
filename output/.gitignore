@@ -1,3 +1,7 @@
 # Base local del núcleo offline y journal/WAL auxiliares.
 telemetry.sqlite3
 telemetry.sqlite3-*
+
+# Capturas SNMP reales separadas de los fixtures
+telemetry-snmp.sqlite3
+telemetry-snmp.sqlite3-*

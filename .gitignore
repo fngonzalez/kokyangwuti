@@ -1,1 +1,4 @@
 .env
+
+# Entorno local del adaptador SNMP
+/.venv/

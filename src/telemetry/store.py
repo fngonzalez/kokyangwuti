@@ -1,6 +1,6 @@
 """SQLite local, lotes finalizados atómicos e histórico con huecos explícitos."""
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 import json
 import os
@@ -9,6 +9,7 @@ import sqlite3
 
 from .model import Observation, PollAttempt, canonical, from_micros, micros
 from .rates import RatePolicy, RateResult, calculate_rate
+from .continuity import ContinuityPolicy, calculate_traffic_rate
 
 
 class ConflictError(ValueError):
@@ -64,19 +65,26 @@ COMMIT;
 
 
 class TelemetryStore:
-    def __init__(self, path: str | Path | None = None):
+    def __init__(self, path: str | Path | None = None, *, read_only: bool = False):
         path = str(path if path is not None else os.getenv(
             "KOKYANGWUTI_DB_PATH", "output/telemetry.sqlite3"))
         if path.startswith(("\\\\", "//")):
             raise ValueError("Se requiere una base local, no una ruta UNC")
-        if path != ":memory:":
-            Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(path, timeout=5)
+        if read_only:
+            if path == ":memory:":
+                raise ValueError("read_only requiere una base existente")
+            self.connection = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
+        else:
+            if path != ":memory:":
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+            self.connection = sqlite3.connect(path, timeout=5)
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys=ON")
         try:
             version = self.connection.execute("PRAGMA user_version").fetchone()[0]
             if version == 0:
+                if read_only:
+                    raise ValueError("La base de lectura no tiene un esquema inicializado")
                 tables = self.connection.execute(
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 ).fetchall()
@@ -185,7 +193,7 @@ class TelemetryStore:
         result["metric_slots_without_good_result"] = result["metric_slots_expected"] - result["metric_results_good"]
         return result
 
-    def _timeline(self, device_id, interface_id, metric, start_us, end_us, predecessor=False):
+    def _timeline(self, device_id, interface_id, metric, start_us, end_us, predecessor=False, limit=1):
         # Cada rama filtra su columna temporal indexada; COALESCE en WHERE
         # obligaría a recorrer toda la serie para consultar un período corto.
         def bounds(column):
@@ -208,13 +216,90 @@ class TelemetryStore:
               AND NOT EXISTS (SELECT 1 FROM observations o
                               WHERE o.poll_id=p.poll_id AND o.metric=pm.metric)
         """
-        query += " ORDER BY sample_us DESC,poll_id DESC LIMIT 1" if predecessor else " ORDER BY sample_us,poll_id"
+        query += " ORDER BY sample_us DESC,poll_id DESC LIMIT ?" if predecessor else " ORDER BY sample_us,poll_id"
         times = (start_us,) if predecessor else (start_us, end_us)
         args = (device_id, interface_id, metric) + times
-        return self.connection.execute(query, args + args).fetchall()
+        return self.connection.execute(query, args + args + ((limit,) if predecessor else ())).fetchall()
+
+    @staticmethod
+    def _observation(row):
+        return (Observation.from_dict(json.loads(row["observation_payload"]))
+                if row is not None and row["observation_payload"] else None)
+
+    @staticmethod
+    def _missing_source(row):
+        if row is None:
+            return None
+        attempt = json.loads(row["poll_payload"])
+        return {"kind": "missing", "poll_id": row["poll_id"],
+                "device_id": attempt["device_id"], "interface_id": attempt["interface_id"],
+                "interface_identity": attempt["interface_identity"],
+                "metric": json.loads(row["spec"]), "raw_value": None, "quality": "missing",
+                "queried_at": from_micros(row["sample_us"]).isoformat(),
+                "time_meaning": "poll_finished_at_without_observation"}
+
+    def _point(self, row, previous_row, policy, now_us):
+        observation, previous = self._observation(row), self._observation(previous_row)
+        if isinstance(policy, ContinuityPolicy):
+            rate = calculate_traffic_rate(previous, observation, policy)
+            if previous is None and previous_row is not None:
+                rate = replace(rate, reason="muestra_ausente",
+                               previous_sample=self._missing_source(previous_row))
+            if observation is None:
+                rate = replace(rate, current_sample=self._missing_source(row))
+            if previous_row is not None and (previous is None or observation is None):
+                rate = replace(rate, elapsed_seconds=(row["sample_us"] - previous_row["sample_us"]) / 1_000_000)
+        elif observation is None:
+            rate = RateResult(None, None, "missing_observation")
+        else:
+            rate = calculate_rate(previous, observation, policy)
+            if previous is None and previous_row is not None and observation.quality == "good":
+                rate = RateResult(None, None, "previous_poll_missing")
+        age = (now_us - row["sample_us"]) / 1_000_000
+        freshness = "stale" if age > policy.stale_after_seconds else "fresh"
+        quality = observation.quality if observation else "missing"
+        attempt = json.loads(row["poll_payload"])
+        return {
+            "kind": "observation" if observation else "missing",
+            "poll_id": row["poll_id"], "poll_status": row["status"], "error_code": row["error_code"],
+            "device_id": attempt["device_id"], "interface_id": attempt["interface_id"],
+            "interface_identity": attempt["interface_identity"], "metric": json.loads(row["spec"]),
+            "queried_at": from_micros(row["sample_us"]).isoformat(),
+            "observed_at": observation.to_dict()["observed_at"] if observation else None,
+            "ingested_at": observation.to_dict()["ingested_at"] if observation else None,
+            "raw_value": observation.raw_value if observation else None,
+            "schema_version": observation.schema_version if observation else None,
+            "dedup_key": observation.dedup_key if observation else None,
+            "uptime_ticks": observation.uptime_ticks if observation else None,
+            "discontinuity_ticks": observation.discontinuity_ticks if observation else None,
+            "interface_index": observation.interface_index if observation else None,
+            "interface_name": observation.interface_name if observation else None,
+            "quality": quality, "age_seconds": age, "freshness": freshness,
+            "current_state": "unknown" if freshness == "stale" or quality != "good" else "known",
+            "rate": asdict(rate),
+        }
+
+    def latest(self, device_id: str, interface_id: str, metric: str,
+               policy: ContinuityPolicy | None = None, as_of: datetime | None = None) -> dict:
+        """Último resultado hasta as_of, inclusive; nunca rescata el último bueno."""
+        policy = policy if policy is not None else ContinuityPolicy()
+        if not isinstance(policy, ContinuityPolicy):
+            raise ValueError("latest requiere ContinuityPolicy")
+        now_us = micros(as_of if as_of is not None else datetime.now(UTC))
+        rows = self._timeline(device_id, interface_id, metric, now_us + 1, now_us + 1,
+                              predecessor=True, limit=2)
+        if not rows:
+            return {"device_id": device_id, "interface_id": interface_id, "metric": metric,
+                    "current_state": "unknown", "freshness": "unknown", "age_seconds": None,
+                    "reason": "sin_muestras", "raw_value": None,
+                    "rate": asdict(calculate_traffic_rate(None, None, policy))}
+        point = self._point(rows[0], rows[1] if len(rows) > 1 else None, policy, now_us)
+        if point["freshness"] == "stale":
+            point["rate"].update(value_bps=None, state="no_calculable", reason="dato_antiguo")
+        return point
 
     def history(self, device_id: str, interface_id: str, metric: str,
-                start: datetime, end: datetime, policy: RatePolicy,
+                start: datetime, end: datetime, policy: RatePolicy | ContinuityPolicy,
                 as_of: datetime | None = None) -> list[dict]:
         """Ventana [start,end); una muestra anterior es contexto, no salida adicional."""
         start_us, end_us = micros(start), micros(end)
@@ -237,10 +322,10 @@ class TelemetryStore:
                 output.append({"kind": "gap", "start": from_micros(left).isoformat(),
                                "end": from_micros(right).isoformat(),
                                "reason": "no_poll_recorded", "raw_value": None,
-                               "rate": None})
+                               "rate": asdict(calculate_traffic_rate(None, None, policy))
+                               if isinstance(policy, ContinuityPolicy) else None})
 
-        previous = (Observation.from_dict(json.loads(predecessor["observation_payload"]))
-                    if predecessor and predecessor["observation_payload"] else None)
+        previous_row = predecessor
         previous_us = predecessor["sample_us"] if predecessor else None
         for row in rows:
             sample_us = row["sample_us"]
@@ -249,39 +334,8 @@ class TelemetryStore:
                     gap(start_us, sample_us)
             elif sample_us - previous_us > max_us:
                 gap(previous_us + expected_us, sample_us)
-            observation = (Observation.from_dict(json.loads(row["observation_payload"]))
-                           if row["observation_payload"] else None)
-            if observation is None:
-                rate = RateResult(None, None, "missing_observation")
-            else:
-                rate = calculate_rate(previous, observation, policy)
-                if previous is None and previous_us is not None and observation.quality == "good":
-                    rate = RateResult(None, None, "previous_poll_missing")
-            age = (now_us - sample_us) / 1_000_000
-            freshness = ("stale" if age > policy.stale_after_seconds else "fresh")
-            quality = observation.quality if observation else "missing"
-            output.append({
-                "kind": "observation" if observation else "missing",
-                "poll_id": row["poll_id"], "poll_status": row["status"],
-                "error_code": row["error_code"],
-                "device_id": device_id, "interface_id": interface_id,
-                "interface_identity": json.loads(row["poll_payload"])["interface_identity"],
-                "metric": json.loads(row["spec"]),
-                "queried_at": from_micros(sample_us).isoformat(),
-                "observed_at": observation.to_dict()["observed_at"] if observation else None,
-                "ingested_at": observation.to_dict()["ingested_at"] if observation else None,
-                "raw_value": observation.raw_value if observation else None,
-                "schema_version": observation.schema_version if observation else None,
-                "dedup_key": observation.dedup_key if observation else None,
-                "uptime_ticks": observation.uptime_ticks if observation else None,
-                "discontinuity_ticks": observation.discontinuity_ticks if observation else None,
-                "interface_index": observation.interface_index if observation else None,
-                "interface_name": observation.interface_name if observation else None,
-                "quality": quality, "age_seconds": age, "freshness": freshness,
-                "current_state": "unknown" if freshness == "stale" or quality != "good" else "known",
-                "rate": asdict(rate),
-            })
-            previous, previous_us = observation, sample_us
+            output.append(self._point(row, previous_row, policy, now_us))
+            previous_row, previous_us = row, sample_us
         if previous_us is None:
             gap(start_us, end_us)
         elif end_us - previous_us > max_us:
